@@ -84,20 +84,10 @@ export default function GraphCutsSegmentation() {
         addLog(`📐 Dimensiones: ${img.width}x${img.height}`, 'success');
         
         const canvas = canvasRef.current;
-        if (!canvas) {
-          addLog('❌ Canvas ref NULL', 'error');
-          return;
-        }
-
         canvas.width = img.width;
         canvas.height = img.height;
         
         const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          addLog('❌ Context NULL', 'error');
-          return;
-        }
-
         ctx.drawImage(img, 0, 0);
         
         const imgData = ctx.getImageData(0, 0, img.width, img.height);
@@ -107,11 +97,11 @@ export default function GraphCutsSegmentation() {
         setMarks({ foreground: [], background: [] });
         setSegmentedImage(null);
         
-        addLog('✅ Imagen cargada', 'success');
+        addLog('✅ Imagen lista', 'success');
       };
       
       img.onerror = () => {
-        addLog('❌ Error cargando imagen', 'error');
+        addLog('❌ Error imagen', 'error');
       };
       
       img.src = event.target.result;
@@ -126,182 +116,171 @@ export default function GraphCutsSegmentation() {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     
+    // OFFSET CORRECTO
     const x = (e.clientX - rect.left) * (canvas.width / rect.width);
     const y = (e.clientY - rect.top) * (canvas.height / rect.height);
     
     const ctx = canvas.getContext('2d');
     
+    // Dibujar círculo
     const color = brushMode === 'foreground' ? 'rgba(0, 255, 0, 0.5)' : 'rgba(255, 0, 0, 0.5)';
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(x, y, brushSize, 0, Math.PI * 2);
     ctx.fill();
 
+    // Guardar marca
     const mark = { x, y };
     
     if (brushMode === 'foreground') {
       setMarks(prev => {
         const newMarks = { ...prev, foreground: [...prev.foreground, mark] };
-        addLog(`✏️ Verde: ${newMarks.foreground.length}`, 'info');
+        addLog(`✏️ Marca verde: ${prev.foreground.length + 1}`, 'info');
         return newMarks;
       });
     } else {
       setMarks(prev => {
         const newMarks = { ...prev, background: [...prev.background, mark] };
-        addLog(`✏️ Rojo: ${newMarks.background.length}`, 'info');
+        addLog(`✏️ Marca roja: ${prev.background.length + 1}`, 'info');
         return newMarks;
       });
     }
   };
 
   const applyGraphCuts = () => {
-    addLog('🔄 INICIANDO SEGMENTACIÓN', 'info');
+    addLog('🔄 Segmentando...', 'info');
     
     if (!imageData) {
-      addLog('❌ SIN IMAGEN', 'error');
+      addLog('❌ Sin imagen', 'error');
       return;
     }
-
-    addLog(`📊 Estado: fg=${marks.foreground.length}, bg=${marks.background.length}`, 'info');
 
     if (marks.foreground.length === 0 || marks.background.length === 0) {
-      addLog('❌ MARCA VERDE Y ROJO', 'error');
+      addLog('❌ Marca verde y rojo', 'error');
       return;
     }
+
+    addLog(`📊 Marcas: ${marks.foreground.length} verde, ${marks.background.length} rojo`, 'info');
 
     const canvas = resultCanvasRef.current;
-    if (!canvas) {
-      addLog('❌ RESULT CANVAS NULL', 'error');
-      return;
-    }
-
     const width = imageData.width;
     const height = imageData.height;
-    
-    addLog(`📐 Canvas: ${width}x${height}`, 'info');
     
     canvas.width = width;
     canvas.height = height;
 
     const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      addLog('❌ RESULT CONTEXT NULL', 'error');
-      return;
-    }
 
     try {
-      addLog('⚙️ CREANDO RESULTADO', 'info');
-      
       const result = new Uint8ClampedArray(imageData.data);
 
-      addLog('🎨 EXTRAYENDO COLORES', 'info');
+      // Obtener colores
+      const fgColors = [];
+      const bgColors = [];
 
-      // Extraer colores simple
-      const fgPixels = [];
-      const bgPixels = [];
-
-      // Copiar píxeles alrededor de cada marca
-      marks.foreground.forEach((mark, idx) => {
-        const r = Math.round(mark.x);
-        const c = Math.round(mark.y);
-        
-        for (let dy = -15; dy <= 15; dy++) {
-          for (let dx = -15; dx <= 15; dx++) {
-            const py = Math.max(0, Math.min(height - 1, c + dy));
-            const px = Math.max(0, Math.min(width - 1, r + dx));
-            const i = (py * width + px) * 4;
-            fgPixels.push({
-              r: imageData.data[i],
-              g: imageData.data[i + 1],
-              b: imageData.data[i + 2],
+      marks.foreground.forEach(mark => {
+        for (let dy = -20; dy <= 20; dy++) {
+          for (let dx = -20; dx <= 20; dx++) {
+            const px = Math.max(0, Math.min(width - 1, Math.round(mark.x + dx)));
+            const py = Math.max(0, Math.min(height - 1, Math.round(mark.y + dy)));
+            const idx = (py * width + px) * 4;
+            fgColors.push({
+              r: imageData.data[idx],
+              g: imageData.data[idx + 1],
+              b: imageData.data[idx + 2],
             });
           }
         }
       });
 
-      marks.background.forEach((mark, idx) => {
-        const r = Math.round(mark.x);
-        const c = Math.round(mark.y);
-        
-        for (let dy = -15; dy <= 15; dy++) {
-          for (let dx = -15; dx <= 15; dx++) {
-            const py = Math.max(0, Math.min(height - 1, c + dy));
-            const px = Math.max(0, Math.min(width - 1, r + dx));
-            const i = (py * width + px) * 4;
-            bgPixels.push({
-              r: imageData.data[i],
-              g: imageData.data[i + 1],
-              b: imageData.data[i + 2],
+      marks.background.forEach(mark => {
+        for (let dy = -20; dy <= 20; dy++) {
+          for (let dx = -20; dx <= 20; dx++) {
+            const px = Math.max(0, Math.min(width - 1, Math.round(mark.x + dx)));
+            const py = Math.max(0, Math.min(height - 1, Math.round(mark.y + dy)));
+            const idx = (py * width + px) * 4;
+            bgColors.push({
+              r: imageData.data[idx],
+              g: imageData.data[idx + 1],
+              b: imageData.data[idx + 2],
             });
           }
         }
       });
 
-      addLog(`🎨 Colores: fg=${fgPixels.length}, bg=${bgPixels.length}`, 'success');
+      addLog(`🎨 Colores: ${fgColors.length} fg, ${bgColors.length} bg`, 'success');
 
-      // Algoritmo simple
-      addLog('🔄 PROCESANDO PÍXELES', 'info');
-      
-      let count = 0;
+      // Procesar píxeles
+      let pixelsProcesados = 0;
       for (let i = 0; i < width * height; i++) {
-        const idx = i * 4;
+        const pixelIdx = i * 4;
         const px = i % width;
         const py = Math.floor(i / width);
-        const r = imageData.data[idx];
-        const g = imageData.data[idx + 1];
-        const b = imageData.data[idx + 2];
 
-        // Distancia a colores foreground
+        const r = imageData.data[pixelIdx];
+        const g = imageData.data[pixelIdx + 1];
+        const b = imageData.data[pixelIdx + 2];
+
+        // Similitud color
         let minDistFg = Infinity;
-        for (let fgPix of fgPixels) {
-          const d = Math.pow(r - fgPix.r, 2) + Math.pow(g - fgPix.g, 2) + Math.pow(b - fgPix.b, 2);
-          if (d < minDistFg) minDistFg = d;
-        }
-
-        // Distancia a colores background
         let minDistBg = Infinity;
-        for (let bgPix of bgPixels) {
-          const d = Math.pow(r - bgPix.r, 2) + Math.pow(g - bgPix.g, 2) + Math.pow(b - bgPix.b, 2);
-          if (d < minDistBg) minDistBg = d;
+
+        for (let color of fgColors) {
+          const dist = Math.pow(r - color.r, 2) + Math.pow(g - color.g, 2) + Math.pow(b - color.b, 2);
+          minDistFg = Math.min(minDistFg, dist);
         }
 
-        // Decisión simple
-        if (minDistFg < minDistBg) {
-          result[idx + 3] = 255; // Foreground opaco
-          count++;
-        } else {
-          result[idx + 3] = 0; // Background transparente
+        for (let color of bgColors) {
+          const dist = Math.pow(r - color.r, 2) + Math.pow(g - color.g, 2) + Math.pow(b - color.b, 2);
+          minDistBg = Math.min(minDistBg, dist);
         }
+
+        // Distancia a marcas
+        let distFgMark = Infinity;
+        let distBgMark = Infinity;
+
+        marks.foreground.forEach(mark => {
+          const dist = Math.pow(px - mark.x, 2) + Math.pow(py - mark.y, 2);
+          distFgMark = Math.min(distFgMark, dist);
+        });
+
+        marks.background.forEach(mark => {
+          const dist = Math.pow(px - mark.x, 2) + Math.pow(py - mark.y, 2);
+          distBgMark = Math.min(distBgMark, dist);
+        });
+
+        // Score: 70% color, 30% distancia
+        const colorSim = (1 - Math.sqrt(minDistFg) / 255) * 0.7;
+        const distSim = (1 - Math.sqrt(distFgMark) / 300) * 0.3;
+        const fgScore = colorSim + distSim;
+
+        const colorSimBg = (1 - Math.sqrt(minDistBg) / 255) * 0.7;
+        const distSimBg = (1 - Math.sqrt(distBgMark) / 300) * 0.3;
+        const bgScore = colorSimBg + distSimBg;
+
+        result[pixelIdx + 3] = fgScore > bgScore ? 255 : 0;
+        pixelsProcesados++;
       }
 
-      addLog(`✅ Píxeles foreground: ${count}`, 'success');
+      addLog(`✅ ${pixelsProcesados} píxeles procesados`, 'success');
 
-      // Dibujar
-      addLog('🎨 DIBUJANDO RESULTADO', 'info');
       const resultData = new ImageData(result, width, height);
       ctx.putImageData(resultData, 0, 0);
+      setSegmentedImage(canvas.toDataURL());
       
-      addLog('📸 CONVIRTIENDO A IMAGE', 'info');
-      const dataUrl = canvas.toDataURL();
-      setSegmentedImage(dataUrl);
-      
-      addLog('✅ ✅ ✅ SEGMENTACIÓN COMPLETADA ✅ ✅ ✅', 'success');
+      addLog('✅ SEGMENTACIÓN LISTA', 'success');
     } catch (err) {
-      addLog(`❌ ERROR: ${err.message}`, 'error');
-      addLog(`Stack: ${err.stack}`, 'error');
-      console.error(err);
+      addLog(`❌ ${err.message}`, 'error');
     }
   };
 
   const clearMarks = () => {
     if (canvasRef.current && image) {
       const ctx = canvasRef.current.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(image, 0, 0);
-        setMarks({ foreground: [], background: [] });
-        setSegmentedImage(null);
-        addLog('🗑️ Limpio', 'info');
-      }
+      ctx.drawImage(image, 0, 0);
+      setMarks({ foreground: [], background: [] });
+      setSegmentedImage(null);
+      addLog('🗑️ Limpio', 'info');
     }
   };
 
@@ -332,7 +311,7 @@ export default function GraphCutsSegmentation() {
         <div className="bg-slate-800 p-3 rounded mb-4 border border-slate-700 flex flex-wrap gap-2">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="px-3 py-2 bg-blue-600 text-white rounded text-sm flex items-center gap-1 font-bold"
+            className="px-3 py-2 bg-blue-600 text-white rounded text-sm flex items-center gap-1"
           >
             <Upload size={16} />
             {t.upload}
@@ -382,7 +361,7 @@ export default function GraphCutsSegmentation() {
 
           <button
             onClick={applyGraphCuts}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-sm font-bold flex items-center gap-1"
+            className="px-3 py-2 bg-emerald-600 text-white rounded text-sm font-bold flex items-center gap-1"
           >
             <Wand2 size={16} />
             {t.segment}
@@ -390,7 +369,7 @@ export default function GraphCutsSegmentation() {
 
           <button
             onClick={clearMarks}
-            className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded text-sm flex items-center gap-1 font-bold"
+            className="px-3 py-2 bg-slate-700 text-slate-300 rounded text-sm flex items-center gap-1"
           >
             <Trash2 size={16} />
             {t.clear}
@@ -399,7 +378,7 @@ export default function GraphCutsSegmentation() {
           {segmentedImage && (
             <button
               onClick={downloadResult}
-              className="px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm flex items-center gap-1 font-bold"
+              className="px-3 py-2 bg-purple-600 text-white rounded text-sm flex items-center gap-1"
             >
               <Download size={16} />
               {t.download}
@@ -409,7 +388,7 @@ export default function GraphCutsSegmentation() {
 
         {/* Main Area */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left: Input Canvas */}
+          {/* Left: Input Canvas - GRANDE */}
           <div className="lg:col-span-1 bg-slate-800 p-3 rounded border border-slate-700">
             <h3 className="text-white font-bold mb-2 text-sm">{t.marked}</h3>
             <div className="bg-black rounded overflow-hidden border border-slate-600">
@@ -424,13 +403,13 @@ export default function GraphCutsSegmentation() {
               />
               {!image && (
                 <div className="w-full h-64 flex items-center justify-center text-slate-500 text-sm">
-                  Sube imagen
+                  Sube una imagen
                 </div>
               )}
             </div>
           </div>
 
-          {/* Center: Result Canvas */}
+          {/* Center: Result Canvas - GRANDE */}
           <div className="lg:col-span-1 bg-slate-800 p-3 rounded border border-slate-700">
             <h3 className="text-white font-bold mb-2 text-sm">{t.result}</h3>
             <div className="bg-black rounded overflow-hidden border border-slate-600">
@@ -438,7 +417,7 @@ export default function GraphCutsSegmentation() {
                 <img src={segmentedImage} alt="Result" className="w-full max-w-sm" />
               ) : (
                 <div className="w-full h-64 flex items-center justify-center text-slate-500 text-sm">
-                  Segmenta
+                  Segmenta para ver resultado
                 </div>
               )}
             </div>
@@ -450,7 +429,7 @@ export default function GraphCutsSegmentation() {
               <h3 className="text-white font-bold text-sm">📋 Logs</h3>
               <button
                 onClick={clearLogs}
-                className="text-xs px-2 py-1 bg-slate-700 text-slate-300 rounded hover:bg-slate-600"
+                className="text-xs px-2 py-1 bg-slate-700 text-slate-300 rounded"
               >
                 Clear
               </button>
