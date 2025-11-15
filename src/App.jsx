@@ -36,20 +36,25 @@ export default function GraphCutsSegmentation() {
     }
   }, [logs]);
 
-  // --- Espera a que OpenCV.js se cargue ---
+  // --- Espera a que OpenCV.js se cargue (Método robusto) ---
   useEffect(() => {
-    // La función onOpenCvReady es llamada por el script en index.html
-    window.onOpenCvReady = () => {
-      setIsCvReady(true);
-      addLog('✅ OpenCV.js listo.', 'success');
-    }
-    // Si ya está cargado (p.ej. Hot Reload)
-    if (window.cv) {
-      setIsCvReady(true);
-      addLog('✅ OpenCV.js ya estaba cargado.', 'success');
-    } else {
-       addLog('... Cargando OpenCV.js (puede tardar)...', 'info');
-    }
+    addLog('... Cargando OpenCV.js (puede tardar)...', 'info');
+    
+    // Función de sondeo (polling)
+    const checkCv = () => {
+      if (window.cv) {
+        // ¡Encontrado!
+        setIsCvReady(true);
+        addLog('✅ OpenCV.js listo.', 'success');
+      } else {
+        // Sigue intentando
+        setTimeout(checkCv, 100);
+      }
+    };
+    
+    checkCv();
+    
+    // No se necesita limpieza, solo se ejecuta una vez
   }, []);
 
   const labels = {
