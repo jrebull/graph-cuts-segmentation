@@ -1,0 +1,30 @@
+{
+  "name": "graph-cuts-segmentation",
+  "version": "1.0.0",
+  "description": "Interactive web application for image segmentation using Graph Cuts algorithm",
+  "type": "module",
+  "author": "Sly",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "setup": "npm install && npm run build",
+    "lint": "eslint src --ext .jsx",
+    "format": "prettier --write src/**/*.jsx",
+    "analyze": "npm run build -- --analyze"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "lucide-react": "^0.263.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^4.3.0"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+}
