@@ -233,11 +233,32 @@ export default function GraphCutsSegmentation() {
          return;
       }
 
+      // --- ¡NUEVO! Calcular Color Promedio ---
+      const getAverageColor = (colors) => {
+        let r = 0, g = 0, b = 0;
+        colors.forEach(color => {
+          r += color.r;
+          g += color.g;
+          b += color.b;
+        });
+        return {
+          r: r / colors.length,
+          g: g / colors.length,
+          b: b / colors.length,
+        };
+      };
+
+      const avgFg = getAverageColor(fgColors);
+      const avgBg = getAverageColor(bgColors);
+
+      addLog(`🎨 Promedio FG: R ${avgFg.r.toFixed(0)}, G ${avgFg.g.toFixed(0)}, B ${avgFg.b.toFixed(0)}`, 'info');
+      addLog(`🎨 Promedio BG: R ${avgBg.r.toFixed(0)}, G ${avgBg.g.toFixed(0)}, B ${avgBg.b.toFixed(0)}`, 'info');
+
       // --- Normalización y Pesos ---
       const maxColorDist = Math.sqrt(255**2 * 3); // Distancia máxima en espacio RGB
       const maxImageDist = Math.sqrt(width**2 + height**2); // Distancia máxima en píxeles
-      const colorWeight = 0.7; // 70% importancia al color
-      const distWeight = 0.3;  // 30% importancia a la distancia
+      const colorWeight = 0.8; // 80% importancia al color
+      const distWeight = 0.2;  // 20% importancia a la distancia
 
       // --- Procesar píxeles ---
       let pixelsProcesados = 0;
@@ -250,19 +271,9 @@ export default function GraphCutsSegmentation() {
         const g = imageData.data[pixelIdx + 1];
         const b = imageData.data[pixelIdx + 2];
 
-        // --- Calcular distancias de color (1-NN) ---
-        let minDistFg = Infinity;
-        let minDistBg = Infinity;
-
-        for (const color of fgColors) {
-          const dist = (r - color.r)**2 + (g - color.g)**2 + (b - color.b)**2;
-          minDistFg = Math.min(minDistFg, dist);
-        }
-
-        for (const color of bgColors) {
-          const dist = (r - color.r)**2 + (g - color.g)**2 + (b - color.b)**2;
-          minDistBg = Math.min(minDistBg, dist);
-        }
+        // --- ¡MODIFICADO! Calcular distancias de color (contra promedios) ---
+        const distToAvgFg = (r - avgFg.r)**2 + (g - avgFg.g)**2 + (b - avgFg.b)**2;
+        const distToAvgBg = (r - avgBg.r)**2 + (g - avgBg.g)**2 + (b - avgBg.b)**2;
 
         // --- Calcular distancias de marcas (1-NN) ---
         let distFgMark = Infinity;
@@ -280,8 +291,8 @@ export default function GraphCutsSegmentation() {
 
         // --- Puntuación final normalizada ---
         // Tomamos la raíz cuadrada para obtener la distancia euclidiana real
-        const normFgColorScore = Math.sqrt(minDistFg) / maxColorDist;
-        const normBgColorScore = Math.sqrt(minDistBg) / maxColorDist;
+        const normFgColorScore = Math.sqrt(distToAvgFg) / maxColorDist;
+        const normBgColorScore = Math.sqrt(distToAvgBg) / maxColorDist;
         
         const normFgDistScore = Math.sqrt(distFgMark) / maxImageDist;
         const normBgDistScore = Math.sqrt(distBgMark) / maxImageDist;
