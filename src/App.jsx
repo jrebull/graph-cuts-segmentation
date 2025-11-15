@@ -11,6 +11,7 @@ export default function GraphCutsSegmentation() {
   const [language, setLanguage] = useState('es');
   const [marks, setMarks] = useState({ foreground: [], background: [] });
   const [logs, setLogs] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false); // Estado para loading
 
   const canvasRef = useRef(null);
   const resultCanvasRef = useRef(null);
@@ -42,6 +43,7 @@ export default function GraphCutsSegmentation() {
       background: 'Fondo (ROJO)',
       brush: 'Tamaño: ',
       segment: 'Segmentar',
+      processing: 'Procesando...',
       clear: 'Limpiar',
       download: 'Descargar',
       marked: 'Imagen Marcada',
@@ -54,6 +56,7 @@ export default function GraphCutsSegmentation() {
       background: 'Background (RED)',
       brush: 'Size: ',
       segment: 'Segment',
+      processing: 'Processing...',
       clear: 'Clear',
       download: 'Download',
       marked: 'Marked Image',
@@ -84,8 +87,13 @@ export default function GraphCutsSegmentation() {
         addLog(`📐 Dimensiones: ${img.width}x${img.height}`, 'success');
         
         const canvas = canvasRef.current;
+        const resultCanvas = resultCanvasRef.current;
+
+        // Ajustar tamaño de canvas
         canvas.width = img.width;
         canvas.height = img.height;
+        resultCanvas.width = img.width;
+        resultCanvas.height = img.height;
         
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0);
@@ -110,17 +118,35 @@ export default function GraphCutsSegmentation() {
     reader.readAsDataURL(file);
   };
 
+  const getCanvasCoordinates = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    
+    return { x, y };
+  };
+
+  const startDrawing = (e) => {
+    setIsDrawing(true);
+    drawOnCanvas(e); // Dibuja el primer punto
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
   const drawOnCanvas = (e) => {
     if (!isDrawing || !canvasRef.current) return;
     
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
+    const { x, y } = getCanvasCoordinates(e);
     
-    // OFFSET CORRECTO
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-    
-    const ctx = canvas.getContext('2d');
+    const ctx = canvasRef.current.getContext('2d');
     
     // Dibujar círculo
     const color = brushMode === 'foreground' ? 'rgba(0, 255, 0, 0.5)' : 'rgba(255, 0, 0, 0.5)';
@@ -132,31 +158,34 @@ export default function GraphCutsSegmentation() {
     // Guardar marca
     const mark = { x, y };
     
-    if (brushMode === 'foreground') {
-      setMarks(prev => {
-        const newMarks = { ...prev, foreground: [...prev.foreground, mark] };
-        addLog(`✏️ Marca verde: ${prev.foreground.length + 1}`, 'info');
-        return newMarks;
-      });
-    } else {
-      setMarks(prev => {
-        const newMarks = { ...prev, background: [...prev.background, mark] };
-        addLog(`✏️ Marca roja: ${prev.background.length + 1}`, 'info');
-        return newMarks;
-      });
-    }
+    setMarks(prev => {
+      const newMarks = { ...prev };
+      if (brushMode === 'foreground') {
+        newMarks.foreground = [...prev.foreground, mark];
+      } else {
+        newMarks.background = [...prev.background, mark];
+      }
+      return newMarks;
+    });
   };
 
-  const applyGraphCuts = () => {
+  // Esta función ahora es asíncrona para permitir que la UI se actualice
+  const applyGraphCuts = async () => {
     addLog('🔄 Segmentando...', 'info');
-    
+    setIsProcessing(true);
+
+    // Pequeña pausa para que el estado 'isProcessing' actualice la UI
+    await new Promise(resolve => setTimeout(resolve, 50));
+
     if (!imageData) {
       addLog('❌ Sin imagen', 'error');
+      setIsProcessing(false);
       return;
     }
 
     if (marks.foreground.length === 0 || marks.background.length === 0) {
       addLog('❌ Marca verde y rojo', 'error');
+      setIsProcessing(false);
       return;
     }
 
@@ -165,52 +194,52 @@ export default function GraphCutsSegmentation() {
     const canvas = resultCanvasRef.current;
     const width = imageData.width;
     const height = imageData.height;
-    
-    canvas.width = width;
-    canvas.height = height;
 
     const ctx = canvas.getContext('2d');
 
     try {
       const result = new Uint8ClampedArray(imageData.data);
 
-      // Obtener colores
+      // --- Recolección de colores optimizada ---
       const fgColors = [];
       const bgColors = [];
+      const sampleSize = 2; // Área de 5x5 (de -2 a +2)
 
-      marks.foreground.forEach(mark => {
-        for (let dy = -20; dy <= 20; dy++) {
-          for (let dx = -20; dx <= 20; dx++) {
-            const px = Math.max(0, Math.min(width - 1, Math.round(mark.x + dx)));
-            const py = Math.max(0, Math.min(height - 1, Math.round(mark.y + dy)));
-            const idx = (py * width + px) * 4;
-            fgColors.push({
-              r: imageData.data[idx],
-              g: imageData.data[idx + 1],
-              b: imageData.data[idx + 2],
-            });
+      const addColorSamples = (markList, colorArray) => {
+        markList.forEach(mark => {
+          for (let dy = -sampleSize; dy <= sampleSize; dy++) {
+            for (let dx = -sampleSize; dx <= sampleSize; dx++) {
+              const px = Math.max(0, Math.min(width - 1, Math.round(mark.x + dx)));
+              const py = Math.max(0, Math.min(height - 1, Math.round(mark.y + dy)));
+              const idx = (py * width + px) * 4;
+              colorArray.push({
+                r: imageData.data[idx],
+                g: imageData.data[idx + 1],
+                b: imageData.data[idx + 2],
+              });
+            }
           }
-        }
-      });
+        });
+      };
 
-      marks.background.forEach(mark => {
-        for (let dy = -20; dy <= 20; dy++) {
-          for (let dx = -20; dx <= 20; dx++) {
-            const px = Math.max(0, Math.min(width - 1, Math.round(mark.x + dx)));
-            const py = Math.max(0, Math.min(height - 1, Math.round(mark.y + dy)));
-            const idx = (py * width + px) * 4;
-            bgColors.push({
-              r: imageData.data[idx],
-              g: imageData.data[idx + 1],
-              b: imageData.data[idx + 2],
-            });
-          }
-        }
-      });
+      addColorSamples(marks.foreground, fgColors);
+      addColorSamples(marks.background, bgColors);
 
       addLog(`🎨 Colores: ${fgColors.length} fg, ${bgColors.length} bg`, 'success');
+      
+      if (fgColors.length === 0 || bgColors.length === 0) {
+         addLog('❌ No se pudieron muestrear colores. Dibuja marcas válidas.', 'error');
+         setIsProcessing(false);
+         return;
+      }
 
-      // Procesar píxeles
+      // --- Normalización y Pesos ---
+      const maxColorDist = Math.sqrt(255**2 * 3); // Distancia máxima en espacio RGB
+      const maxImageDist = Math.sqrt(width**2 + height**2); // Distancia máxima en píxeles
+      const colorWeight = 0.7; // 70% importancia al color
+      const distWeight = 0.3;  // 30% importancia a la distancia
+
+      // --- Procesar píxeles ---
       let pixelsProcesados = 0;
       for (let i = 0; i < width * height; i++) {
         const pixelIdx = i * 4;
@@ -221,44 +250,48 @@ export default function GraphCutsSegmentation() {
         const g = imageData.data[pixelIdx + 1];
         const b = imageData.data[pixelIdx + 2];
 
-        // Similitud color
+        // --- Calcular distancias de color (1-NN) ---
         let minDistFg = Infinity;
         let minDistBg = Infinity;
 
-        for (let color of fgColors) {
-          const dist = Math.pow(r - color.r, 2) + Math.pow(g - color.g, 2) + Math.pow(b - color.b, 2);
+        for (const color of fgColors) {
+          const dist = (r - color.r)**2 + (g - color.g)**2 + (b - color.b)**2;
           minDistFg = Math.min(minDistFg, dist);
         }
 
-        for (let color of bgColors) {
-          const dist = Math.pow(r - color.r, 2) + Math.pow(g - color.g, 2) + Math.pow(b - color.b, 2);
+        for (const color of bgColors) {
+          const dist = (r - color.r)**2 + (g - color.g)**2 + (b - color.b)**2;
           minDistBg = Math.min(minDistBg, dist);
         }
 
-        // Distancia a marcas
+        // --- Calcular distancias de marcas (1-NN) ---
         let distFgMark = Infinity;
         let distBgMark = Infinity;
 
-        marks.foreground.forEach(mark => {
-          const dist = Math.pow(px - mark.x, 2) + Math.pow(py - mark.y, 2);
+        for (const mark of marks.foreground) {
+          const dist = (px - mark.x)**2 + (py - mark.y)**2;
           distFgMark = Math.min(distFgMark, dist);
-        });
+        }
 
-        marks.background.forEach(mark => {
-          const dist = Math.pow(px - mark.x, 2) + Math.pow(py - mark.y, 2);
+        for (const mark of marks.background) {
+          const dist = (px - mark.x)**2 + (py - mark.y)**2;
           distBgMark = Math.min(distBgMark, dist);
-        });
+        }
 
-        // Score: 70% color, 30% distancia
-        const colorSim = (1 - Math.sqrt(minDistFg) / 255) * 0.7;
-        const distSim = (1 - Math.sqrt(distFgMark) / 300) * 0.3;
-        const fgScore = colorSim + distSim;
+        // --- Puntuación final normalizada ---
+        // Tomamos la raíz cuadrada para obtener la distancia euclidiana real
+        const normFgColorScore = Math.sqrt(minDistFg) / maxColorDist;
+        const normBgColorScore = Math.sqrt(minDistBg) / maxColorDist;
+        
+        const normFgDistScore = Math.sqrt(distFgMark) / maxImageDist;
+        const normBgDistScore = Math.sqrt(distBgMark) / maxImageDist;
 
-        const colorSimBg = (1 - Math.sqrt(minDistBg) / 255) * 0.7;
-        const distSimBg = (1 - Math.sqrt(distBgMark) / 300) * 0.3;
-        const bgScore = colorSimBg + distSimBg;
+        // Puntuación total (menor es mejor)
+        const totalFgScore = (normFgColorScore * colorWeight) + (normFgDistScore * distWeight);
+        const totalBgScore = (normBgColorScore * colorWeight) + (normBgDistScore * distWeight);
 
-        result[pixelIdx + 3] = fgScore > bgScore ? 255 : 0;
+        // Si la puntuación del objeto (fg) es menor, es objeto.
+        result[pixelIdx + 3] = totalFgScore < totalBgScore ? 255 : 0;
         pixelsProcesados++;
       }
 
@@ -271,6 +304,8 @@ export default function GraphCutsSegmentation() {
       addLog('✅ SEGMENTACIÓN LISTA', 'success');
     } catch (err) {
       addLog(`❌ ${err.message}`, 'error');
+    } finally {
+      setIsProcessing(false); // Termina el procesamiento
     }
   };
 
@@ -278,6 +313,10 @@ export default function GraphCutsSegmentation() {
     if (canvasRef.current && image) {
       const ctx = canvasRef.current.getContext('2d');
       ctx.drawImage(image, 0, 0);
+      
+      const resCtx = resultCanvasRef.current.getContext('2d');
+      resCtx.clearRect(0, 0, resultCanvasRef.current.width, resultCanvasRef.current.height);
+
       setMarks({ foreground: [], background: [] });
       setSegmentedImage(null);
       addLog('🗑️ Limpio', 'info');
@@ -294,24 +333,25 @@ export default function GraphCutsSegmentation() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 p-4">
-      <div className="max-w-full">
+    <div className="min-h-screen bg-slate-900 p-4 text-white">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-4 flex justify-between items-center">
           <h1 className="text-2xl font-bold text-white">{t.title}</h1>
           <button
             onClick={() => setLanguage(language === 'es' ? 'en' : 'es')}
-            className="px-3 py-1 bg-purple-600 text-white rounded text-sm"
+            className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition-colors"
           >
             {language === 'es' ? 'EN' : 'ES'}
           </button>
         </div>
 
         {/* Controls */}
-        <div className="bg-slate-800 p-3 rounded mb-4 border border-slate-700 flex flex-wrap gap-2">
+        <div className="bg-slate-800 p-3 rounded mb-4 border border-slate-700 flex flex-wrap gap-2 items-center">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="px-3 py-2 bg-blue-600 text-white rounded text-sm flex items-center gap-1"
+            className="px-3 py-2 bg-blue-600 text-white rounded text-sm flex items-center gap-1 hover:bg-blue-700 transition-colors"
+            disabled={isProcessing}
           >
             <Upload size={16} />
             {t.upload}
@@ -326,22 +366,24 @@ export default function GraphCutsSegmentation() {
 
           <button
             onClick={() => setBrushMode('foreground')}
-            className={`px-3 py-2 rounded text-sm font-bold ${
+            className={`px-3 py-2 rounded text-sm font-bold transition-colors ${
               brushMode === 'foreground'
                 ? 'bg-emerald-600 text-white'
-                : 'bg-slate-700 text-slate-300'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             }`}
+            disabled={isProcessing}
           >
             🟢 {t.foreground}
           </button>
 
           <button
             onClick={() => setBrushMode('background')}
-            className={`px-3 py-2 rounded text-sm font-bold ${
+            className={`px-3 py-2 rounded text-sm font-bold transition-colors ${
               brushMode === 'background'
                 ? 'bg-red-600 text-white'
-                : 'bg-slate-700 text-slate-300'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             }`}
+            disabled={isProcessing}
           >
             🔴 {t.background}
           </button>
@@ -354,22 +396,34 @@ export default function GraphCutsSegmentation() {
               max="50"
               value={brushSize}
               onChange={(e) => setBrushSize(parseInt(e.target.value))}
-              className="w-20"
+              className="w-24"
+              disabled={isProcessing}
             />
-            <span className="text-white text-sm font-bold w-6">{brushSize}</span>
+            <span className="text-white text-sm font-bold w-6 text-right">{brushSize}</span>
           </div>
 
           <button
             onClick={applyGraphCuts}
-            className="px-3 py-2 bg-emerald-600 text-white rounded text-sm font-bold flex items-center gap-1"
+            className="px-3 py-2 bg-emerald-600 text-white rounded text-sm font-bold flex items-center gap-1 hover:bg-emerald-700 transition-colors disabled:bg-emerald-800 disabled:text-slate-400"
+            disabled={isProcessing}
           >
-            <Wand2 size={16} />
-            {t.segment}
+            {isProcessing ? (
+              <>
+                <div className="w-4 h-4 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
+                {t.processing}
+              </>
+            ) : (
+              <>
+                <Wand2 size={16} />
+                {t.segment}
+              </>
+            )}
           </button>
 
           <button
             onClick={clearMarks}
-            className="px-3 py-2 bg-slate-700 text-slate-300 rounded text-sm flex items-center gap-1"
+            className="px-3 py-2 bg-slate-700 text-slate-300 rounded text-sm flex items-center gap-1 hover:bg-slate-600 transition-colors"
+            disabled={isProcessing}
           >
             <Trash2 size={16} />
             {t.clear}
@@ -378,7 +432,7 @@ export default function GraphCutsSegmentation() {
           {segmentedImage && (
             <button
               onClick={downloadResult}
-              className="px-3 py-2 bg-purple-600 text-white rounded text-sm flex items-center gap-1"
+              className="px-3 py-2 bg-purple-600 text-white rounded text-sm flex items-center gap-1 hover:bg-purple-700 transition-colors"
             >
               <Download size={16} />
               {t.download}
@@ -386,55 +440,61 @@ export default function GraphCutsSegmentation() {
           )}
         </div>
 
-        {/* Main Area */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left: Input Canvas - GRANDE */}
-          <div className="lg:col-span-1 bg-slate-800 p-3 rounded border border-slate-700">
+        {/* --- Main Area (Nuevo Layout) --- */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          
+          {/* Columna Izquierda: Imagen Marcada */}
+          <div className="lg:col-span-2 bg-slate-800 p-3 rounded border border-slate-700">
             <h3 className="text-white font-bold mb-2 text-sm">{t.marked}</h3>
-            <div className="bg-black rounded overflow-hidden border border-slate-600">
-              <canvas
-                ref={canvasRef}
-                onMouseDown={() => setIsDrawing(true)}
-                onMouseUp={() => setIsDrawing(false)}
-                onMouseLeave={() => setIsDrawing(false)}
-                onMouseMove={drawOnCanvas}
-                className="w-full cursor-crosshair max-w-sm"
-                style={{ display: image ? 'block' : 'none' }}
-              />
+            <div className="bg-black rounded overflow-hidden border border-slate-600 w-full">
+              {/* Contenedor para centrar el canvas si es más pequeño que el div */}
+              <div className="flex justify-center items-center">
+                <canvas
+                  ref={canvasRef}
+                  onMouseDown={startDrawing}
+                  onMouseUp={stopDrawing}
+                  onMouseLeave={stopDrawing}
+                  onMouseMove={drawOnCanvas}
+                  className="cursor-crosshair"
+                  style={{ display: image ? 'block' : 'none', width: '100%', height: 'auto' }}
+                />
+              </div>
               {!image && (
-                <div className="w-full h-64 flex items-center justify-center text-slate-500 text-sm">
-                  Sube una imagen
+                <div className="w-full h-64 lg:h-96 flex items-center justify-center text-slate-500 text-sm">
+                  Sube una imagen para empezar
                 </div>
               )}
             </div>
           </div>
 
-          {/* Center: Result Canvas - GRANDE */}
-          <div className="lg:col-span-1 bg-slate-800 p-3 rounded border border-slate-700">
+          {/* Columna Central: Resultado */}
+          <div className="lg:col-span-2 bg-slate-800 p-3 rounded border border-slate-700">
             <h3 className="text-white font-bold mb-2 text-sm">{t.result}</h3>
-            <div className="bg-black rounded overflow-hidden border border-slate-600">
-              {segmentedImage ? (
-                <img src={segmentedImage} alt="Result" className="w-full max-w-sm" />
-              ) : (
-                <div className="w-full h-64 flex items-center justify-center text-slate-500 text-sm">
-                  Segmenta para ver resultado
-                </div>
-              )}
+            <div className="bg-black rounded overflow-hidden border border-slate-600 w-full">
+              <div className="flex justify-center items-center">
+                {segmentedImage ? (
+                  <img src={segmentedImage} alt="Result" className="w-full h-auto" />
+                ) : (
+                  <div className="w-full h-64 lg:h-96 flex items-center justify-center text-slate-500 text-sm">
+                    {isProcessing ? 'Procesando...' : 'Aquí aparecerá el resultado'}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Right: Logs */}
-          <div className="lg:col-span-1 bg-slate-800 p-3 rounded border border-slate-700">
+          {/* Columna Derecha: Logs */}
+          <div className="lg:col-span-1 bg-slate-800 p-3 rounded border border-slate-700 flex flex-col" style={{maxHeight: 'calc(100vh - 10rem)'}}>
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-white font-bold text-sm">📋 Logs</h3>
               <button
                 onClick={clearLogs}
-                className="text-xs px-2 py-1 bg-slate-700 text-slate-300 rounded"
+                className="text-xs px-2 py-1 bg-slate-700 text-slate-300 rounded hover:bg-slate-600"
               >
-                Clear
+                Limpiar
               </button>
             </div>
-            <div className="bg-black rounded p-2 h-64 overflow-y-auto border border-slate-600 font-mono text-xs space-y-0.5">
+            <div className="bg-black rounded p-2 flex-grow overflow-y-auto border border-slate-600 font-mono text-xs space-y-0.5">
               {logs.length === 0 ? (
                 <div className="text-slate-600">Esperando...</div>
               ) : (
@@ -449,7 +509,8 @@ export default function GraphCutsSegmentation() {
                         : 'text-slate-400'
                     }`}
                   >
-                    <span className="text-slate-700">[{log.timestamp}]</span> {log.message}
+                    <span className="text-gray-600 mr-1">[{log.timestamp}]</span> 
+                    {log.message}
                   </div>
                 ))
               )}
